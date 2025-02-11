@@ -40,7 +40,7 @@ class Listener {
     var options = {
       ns: this.options.mongo.db + '.' + this.options.mongo.collection,
       poolSize: 1,
-      reconnectTries: 2,
+      reconnectTries: 5,
     };
     this.getLastOpTimestamp((err, since) => {
       if (err) {
@@ -154,9 +154,9 @@ class Listener {
         '/' +
         this.options.mongo.db;
       this.client = new MongoClient(uri, {
-        useNewUrlParser: true,
         replicaSet: this.options.mongo.replicaSet,
         authSource: this.options.mongo.authSource,
+        retryReads: true,
         retryWrites: true,
         writeConcern: 'majority',
         ssl: true,
@@ -250,10 +250,10 @@ class Listener {
         .db(this.options.mongo.db)
         .collection(this.options.mongo.collection)
         .watch(pipeline, {
+          startAtOperationTime: this.options.since,
           fullDocument: 'updateLookup',
         });
       changeStream.on('change', (changeEvent) => {
-        const operationType = changeEvent.operationType;
         const fullDoc = changeEvent.fullDocument;
 
         this.processor.processDoc(fullDoc, false, (err) => {
