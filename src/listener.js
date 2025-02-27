@@ -1,15 +1,14 @@
-'use strict';
+"use strict";
 
-var fs = require('fs');
-var os = require('os');
-var http = require('http');
-var _ = require('lodash');
-const { MongoClient } = require('mongodb');
-var mongoCursorProcessing = require('mongo-cursor-processing');
-var Timestamp = require('bson');
-var redis = require('redis');
-var Processor = require('./processor');
-var defaultOptions = require('./default-options');
+var fs = require("fs");
+var os = require("os");
+var http = require("http");
+var _ = require("lodash");
+const { MongoClient, Timestamp } = require("mongodb");
+var mongoCursorProcessing = require("mongo-cursor-processing");
+var redis = require("redis");
+var Processor = require("./processor");
+var defaultOptions = require("./default-options");
 
 class Listener {
   constructor(options) {
@@ -38,28 +37,28 @@ class Listener {
 
   start() {
     var options = {
-      ns: this.options.mongo.db + '.' + this.options.mongo.collection,
+      ns: this.options.mongo.db + "." + this.options.mongo.collection,
       poolSize: 1,
       reconnectTries: 5,
     };
     this.getLastOpTimestamp((err, since) => {
       if (err) {
-        this.log(new Error('error reading lastop: ' + err));
+        this.log(new Error("error reading lastop: " + err));
       }
       if (since) {
         options.since = since;
       }
       if (options.since) {
-        this.log('info', 'resuming from timestamp ' + since);
+        this.log("info", "resuming from timestamp " + since);
       } else {
         if (!this.options.skipFullUpsert) {
           this.log(
-            'info',
-            'unable to determine last op, processing entire collection...'
+            "info",
+            "unable to determine last op, processing entire collection..."
           );
           this.processEntireCollection();
         } else {
-          this.log('info', 'unable to determine last op');
+          this.log("info", "unable to determine last op");
         }
       }
 
@@ -77,7 +76,7 @@ class Listener {
       this.redisClient.set(this.options.redisLastOp.key, ts.toString());
       return;
     }
-    fs.writeFileSync('lastop.json', ts.toString());
+    fs.writeFileSync("lastop.json", ts.toString());
   }
 
   startHttpServer() {
@@ -86,30 +85,30 @@ class Listener {
     }
     var port = this.options.http.port;
     this.httpServer = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.writeHead(200, { "Content-Type": "text/plain" });
       var data = {
         db: this.options.mongo.db,
         collection: this.options.mongo.collection,
         memoryUsage: process.memoryUsage(),
         loadavg: os.loadavg(),
-        lastOp: this.lastOp || 'unknown',
+        lastOp: this.lastOp || "unknown",
         queueSize: this.processor.processQueue.length,
       };
       res.write(JSON.stringify(data, null, 2));
       res.end();
     });
     this.httpServer.listen(port);
-    this.log('server listening at http://localhost:' + port);
+    this.log("server listening at http://localhost:" + port);
   }
 
   getLastOpTimestamp(done) {
     var ts;
     function readFromFile() {
-      if (fs.existsSync('lastop.json')) {
+      if (fs.existsSync("lastop.json")) {
         try {
-          ts = Timestamp.fromString(fs.readFileSync('lastop.json').toString());
+          ts = Timestamp.fromString(fs.readFileSync("lastop.json").toString());
         } catch (err) {
-          this.log(new Error('error reading lastop file: ' + err.toString()));
+          this.log(new Error("error reading lastop file: " + err.toString()));
         }
       }
       done(null, ts);
@@ -119,8 +118,8 @@ class Listener {
       try {
         if (!this.redisClient) {
           this.redisClient = redis.createClient(this.options.redisLastOp.url);
-          this.redisClient.on('error', (err) => {
-            this.log(new Error('Redis client error: ' + err.toString()));
+          this.redisClient.on("error", (err) => {
+            this.log(new Error("Redis client error: " + err.toString()));
           });
         }
         this.redisClient.get(this.options.redisLastOp.key, (err, value) => {
@@ -132,7 +131,7 @@ class Listener {
               ts = Timestamp.fromString(value.toString());
             } catch (err) {
               this.log(
-                new Error('error reading lastop redis key: ' + err.toString())
+                new Error("error reading lastop redis key: " + err.toString())
               );
             }
           }
@@ -151,14 +150,14 @@ class Listener {
     if (!this.client) {
       const uri =
         this.options.mongo.uriEntireCollectionRead +
-        '/' +
+        "/" +
         this.options.mongo.db;
       this.client = new MongoClient(uri, {
         replicaSet: this.options.mongo.replicaSet,
         authSource: this.options.mongo.authSource,
         retryReads: true,
         retryWrites: true,
-        writeConcern: 'majority',
+        writeConcern: "majority",
         ssl: true,
       });
 
@@ -172,15 +171,15 @@ class Listener {
       const pipeline = [
         {
           $match: {
-            'ns.coll': this.options.mongo.collection,
+            "ns.coll": this.options.mongo.collection,
             $or: [
               // For updates, only process if there’s at least one updated field that is not in the ignored list.
               {
                 $expr: {
                   if: {
                     $or: [
-                      { $eq: ['$updateDescription.updatedFields', null] },
-                      { $not: ['$updateDescription.updatedFields'] },
+                      { $eq: ["$updateDescription.updatedFields", null] },
+                      { $not: ["$updateDescription.updatedFields"] },
                     ],
                   },
                   then: false,
@@ -191,41 +190,41 @@ class Listener {
                           $filter: {
                             input: {
                               $objectToArray:
-                                '$updateDescription.updatedFields',
+                                "$updateDescription.updatedFields",
                             },
-                            as: 'field',
+                            as: "field",
                             cond: {
                               $not: {
                                 $or: [
                                   {
                                     $regexMatch: {
-                                      input: '$$field.k',
+                                      input: "$$field.k",
                                       regex: /^modifiedAt$/,
                                     },
                                   },
                                   {
                                     $regexMatch: {
-                                      input: '$$field.k',
+                                      input: "$$field.k",
                                       regex: /^styles\.\d+\.modifiedAt$/,
                                     },
                                   },
                                   {
                                     $regexMatch: {
-                                      input: '$$field.k',
+                                      input: "$$field.k",
                                       regex:
                                         /^styles\.\d+\.crawlerInfo\.jobId$/,
                                     },
                                   },
                                   {
                                     $regexMatch: {
-                                      input: '$$field.k',
+                                      input: "$$field.k",
                                       regex:
                                         /^styles\.\d+\.crawlerInfo\.lastCrawled$/,
                                     },
                                   },
                                   {
                                     $regexMatch: {
-                                      input: '$$field.k',
+                                      input: "$$field.k",
                                       regex:
                                         /^styles\.\d+\.variants\.\d+\.stockUpdatedAt$/,
                                     },
@@ -251,14 +250,14 @@ class Listener {
         .collection(this.options.mongo.collection)
         .watch(pipeline, {
           startAtOperationTime: new Timestamp(this.options.since, 0),
-          fullDocument: 'updateLookup',
+          fullDocument: "updateLookup",
         });
-      changeStream.on('change', (changeEvent) => {
+      changeStream.on("change", (changeEvent) => {
         const fullDoc = changeEvent.fullDocument;
 
         this.processor.processDoc(fullDoc, false, (err) => {
           if (err) {
-            this.log(new Error('error processing change:', changeEvent));
+            this.log(new Error("error processing change:", changeEvent));
             this.log(err);
           }
         });
@@ -268,13 +267,13 @@ class Listener {
       });
 
       // Handle errors
-      changeStream.on('error', (error) => {
+      changeStream.on("error", (error) => {
         this.log(error);
       });
 
-      this.log('info', 'Change stream started');
+      this.log("info", "Change stream started");
     } catch (err) {
-      this.log('error', 'Failed to start change stream:', err);
+      this.log("error", "Failed to start change stream:", err);
     }
   }
 
@@ -301,7 +300,7 @@ class Listener {
     mongoCursorProcessing(cursor, processDocument, concurrency, (err) => {
       if (err) {
         this.log(
-          new Error('error processing entire collection: ' + err.toString())
+          new Error("error processing entire collection: " + err.toString())
         );
         process.exit(1);
       }
@@ -309,14 +308,14 @@ class Listener {
         (new Date().getTime() - startTime) / 1000
       );
       this.log(
-        'info',
-        'entire collection processed (' +
+        "info",
+        "entire collection processed (" +
           count +
-          ' documents, ' +
+          " documents, " +
           Math.floor(elapsedSeconds / 60) +
-          'm' +
+          "m" +
           (elapsedSeconds % 60) +
-          's).'
+          "s)."
       );
       if (db) {
         db.close();
