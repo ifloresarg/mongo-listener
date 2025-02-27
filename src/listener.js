@@ -249,7 +249,7 @@ class Listener {
         .db(this.options.mongo.db)
         .collection(this.options.mongo.collection)
         .watch(pipeline, {
-          startAtOperationTime: new Timestamp(this.options.since || nowInSeconds, 0),
+          startAtOperationTime: new Timestamp({t: this.options.since || nowInSeconds, i: 0}),
           fullDocument: "updateLookup",
         });
       changeStream.on("change", (changeEvent) => {
