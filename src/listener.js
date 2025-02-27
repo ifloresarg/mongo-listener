@@ -244,12 +244,12 @@ class Listener {
           },
         },
       ];
-
+      const nowInSeconds = Math.floor(new Date().getTime() / 1000);
       const changeStream = this.client
         .db(this.options.mongo.db)
         .collection(this.options.mongo.collection)
         .watch(pipeline, {
-          startAtOperationTime: new Timestamp(this.options.since, 0),
+          startAtOperationTime: new Timestamp(this.options.since || nowInSeconds, 0),
           fullDocument: "updateLookup",
         });
       changeStream.on("change", (changeEvent) => {
