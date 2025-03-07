@@ -173,83 +173,112 @@ class Listener {
           $match: {
             "ns.coll": this.options.mongo.collection,
             $or: [
-              // For updates, only process if there’s at least one updated field that is not in the ignored list.
+              // For updates, only process if there's at least one updated field that is not in the ignored list.
               {
                 $expr: {
-                  if: {
-                    $or: [
-                      { $eq: ["$updateDescription.updatedFields", null] },
-                      { $not: ["$updateDescription.updatedFields"] },
-                    ],
-                  },
-                  then: false,
-                  else: {
-                    $gt: [
-                      {
-                        $size: {
-                          $filter: {
-                            input: {
-                              $objectToArray:
-                                "$updateDescription.updatedFields",
-                            },
-                            as: "field",
-                            cond: {
-                              $not: {
-                                $or: [
-                                  {
-                                    $regexMatch: {
-                                      input: "$$field.k",
-                                      regex: /^modifiedAt$/,
-                                    },
+                  $cond: {
+                    if: {
+                      $or: [
+                        { $eq: ["$updateDescription.updatedFields", null] },
+                        { $eq: ["$updateDescription", null] },
+                        {
+                          $eq: [
+                            { $type: "$updateDescription.updatedFields" },
+                            "missing",
+                          ],
+                        },
+                      ],
+                    },
+                    then: true, // Include documents that don't have updateDescription.updatedFields
+                    else: {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: {
+                                $cond: {
+                                  if: {
+                                    $isArray: [
+                                      {
+                                        $objectToArray:
+                                          "$updateDescription.updatedFields",
+                                      },
+                                    ],
                                   },
-                                  {
-                                    $regexMatch: {
-                                      input: "$$field.k",
-                                      regex: /^styles\.\d+\.modifiedAt$/,
-                                    },
+                                  then: {
+                                    $objectToArray:
+                                      "$updateDescription.updatedFields",
                                   },
-                                  {
-                                    $regexMatch: {
-                                      input: "$$field.k",
-                                      regex:
-                                        /^styles\.\d+\.crawlerInfo\.jobId$/,
+                                  else: [],
+                                },
+                              },
+                              as: "field",
+                              cond: {
+                                $not: {
+                                  $or: [
+                                    // ...existing regex conditions remain the same...
+                                    {
+                                      $regexMatch: {
+                                        input: "$$field.k",
+                                        regex: /^modifiedAt$/,
+                                      },
                                     },
-                                  },
-                                  {
-                                    $regexMatch: {
-                                      input: "$$field.k",
-                                      regex:
-                                        /^styles\.\d+\.crawlerInfo\.lastCrawled$/,
+                                    {
+                                      $regexMatch: {
+                                        input: "$$field.k",
+                                        regex: /^styles\.\d+\.modifiedAt$/,
+                                      },
                                     },
-                                  },
-                                  {
-                                    $regexMatch: {
-                                      input: "$$field.k",
-                                      regex:
-                                        /^styles\.\d+\.variants\.\d+\.stockUpdatedAt$/,
+                                    {
+                                      $regexMatch: {
+                                        input: "$$field.k",
+                                        regex:
+                                          /^styles\.\d+\.crawlerInfo\.jobId$/,
+                                      },
                                     },
-                                  },
-                                ],
+                                    {
+                                      $regexMatch: {
+                                        input: "$$field.k",
+                                        regex:
+                                          /^styles\.\d+\.crawlerInfo\.lastCrawled$/,
+                                      },
+                                    },
+                                    {
+                                      $regexMatch: {
+                                        input: "$$field.k",
+                                        regex:
+                                          /^styles\.\d+\.variants\.\d+\.stockUpdatedAt$/,
+                                      },
+                                    },
+                                  ],
+                                },
                               },
                             },
                           },
                         },
-                      },
-                      0,
-                    ],
+                        0,
+                      ],
+                    },
                   },
                 },
               },
+              // Include other operations like inserts or deletes
+              { operationType: { $in: ["insert", "delete", "replace"] } },
             ],
           },
         },
       ];
+
+      // Rest of the function remains unchanged
       const nowInSeconds = Math.floor(new Date().getTime() / 1000);
       const changeStream = this.client
         .db(this.options.mongo.db)
         .collection(this.options.mongo.collection)
         .watch(pipeline, {
-          startAtOperationTime: new Timestamp({t: this.options.since || nowInSeconds, i: 0}),
+          startAtOperationTime: new Timestamp({
+            t: this.options.since || nowInSeconds,
+            i: 0,
+          }),
           fullDocument: "updateLookup",
         });
       changeStream.on("change", (changeEvent) => {
