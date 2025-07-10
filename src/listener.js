@@ -159,151 +159,197 @@ class Listener {
         retryWrites: true,
         writeConcern: "majority",
         ssl: true,
+        serverSelectionTimeoutMS: 30000,
+        connectTimeoutMS: 30000,
+        maxPoolSize: 10,
+        minPoolSize: 1,
       });
 
-      await this.client.connect();
+      try {
+        await this.client.connect();
+        this.log("info", "MongoDB client connected successfully");
+      } catch (err) {
+        this.log("error", "Failed to connect to MongoDB:", err);
+        throw err;
+      }
+    }
+  }
+
+  async checkConnection() {
+    try {
+      await this.client.db(this.options.mongo.db).admin().ping();
+      return true;
+    } catch (err) {
+      this.log("error", "Connection health check failed:", err);
+      return false;
     }
   }
 
   async watchCollection() {
-    try {
-      // Define a pipeline to filter changes
-      const pipeline = [
-        {
-          $match: {
-            "ns.coll": this.options.mongo.collection,
-            $or: [
-              // For updates, only process if there's at least one updated field that is not in the ignored list.
-              {
-                $expr: {
-                  $cond: {
-                    if: {
-                      $or: [
-                        { $eq: ["$updateDescription.updatedFields", null] },
-                        { $eq: ["$updateDescription", null] },
-                        {
-                          $eq: [
-                            { $type: "$updateDescription.updatedFields" },
-                            "missing",
-                          ],
-                        },
-                      ],
-                    },
-                    then: true, // Include documents that don't have updateDescription.updatedFields
-                    else: {
-                      $gt: [
-                        {
-                          $size: {
-                            $filter: {
-                              input: {
-                                $cond: {
-                                  if: {
-                                    $isArray: [
+    const startWatchStream = async () => {
+      try {
+        // Ensure client is connected
+        await this.connectClient();
+
+        // Define a pipeline to filter changes
+        const pipeline = [
+          {
+            $match: {
+              "ns.coll": this.options.mongo.collection,
+              $or: [
+                // For updates, only process if there's at least one updated field that is not in the ignored list.
+                {
+                  $expr: {
+                    $cond: {
+                      if: {
+                        $or: [
+                          { $eq: ["$updateDescription.updatedFields", null] },
+                          { $eq: ["$updateDescription", null] },
+                          {
+                            $eq: [
+                              { $type: "$updateDescription.updatedFields" },
+                              "missing",
+                            ],
+                          },
+                        ],
+                      },
+                      then: true, // Include documents that don't have updateDescription.updatedFields
+                      else: {
+                        $gt: [
+                          {
+                            $size: {
+                              $filter: {
+                                input: {
+                                  $cond: {
+                                    if: {
+                                      $isArray: [
+                                        {
+                                          $objectToArray:
+                                            "$updateDescription.updatedFields",
+                                        },
+                                      ],
+                                    },
+                                    then: {
+                                      $objectToArray:
+                                        "$updateDescription.updatedFields",
+                                    },
+                                    else: [],
+                                  },
+                                },
+                                as: "field",
+                                cond: {
+                                  $not: {
+                                    $or: [
+                                      // ...existing regex conditions remain the same...
                                       {
-                                        $objectToArray:
-                                          "$updateDescription.updatedFields",
+                                        $regexMatch: {
+                                          input: "$$field.k",
+                                          regex: /^modifiedAt$/,
+                                        },
+                                      },
+                                      {
+                                        $regexMatch: {
+                                          input: "$$field.k",
+                                          regex: /^styles\.\d+\.modifiedAt$/,
+                                        },
+                                      },
+                                      {
+                                        $regexMatch: {
+                                          input: "$$field.k",
+                                          regex:
+                                            /^styles\.\d+\.crawlerInfo\.jobId$/,
+                                        },
+                                      },
+                                      {
+                                        $regexMatch: {
+                                          input: "$$field.k",
+                                          regex:
+                                            /^styles\.\d+\.crawlerInfo\.lastCrawled$/,
+                                        },
+                                      },
+                                      {
+                                        $regexMatch: {
+                                          input: "$$field.k",
+                                          regex:
+                                            /^styles\.\d+\.variants\.\d+\.stockUpdatedAt$/,
+                                        },
                                       },
                                     ],
                                   },
-                                  then: {
-                                    $objectToArray:
-                                      "$updateDescription.updatedFields",
-                                  },
-                                  else: [],
-                                },
-                              },
-                              as: "field",
-                              cond: {
-                                $not: {
-                                  $or: [
-                                    // ...existing regex conditions remain the same...
-                                    {
-                                      $regexMatch: {
-                                        input: "$$field.k",
-                                        regex: /^modifiedAt$/,
-                                      },
-                                    },
-                                    {
-                                      $regexMatch: {
-                                        input: "$$field.k",
-                                        regex: /^styles\.\d+\.modifiedAt$/,
-                                      },
-                                    },
-                                    {
-                                      $regexMatch: {
-                                        input: "$$field.k",
-                                        regex:
-                                          /^styles\.\d+\.crawlerInfo\.jobId$/,
-                                      },
-                                    },
-                                    {
-                                      $regexMatch: {
-                                        input: "$$field.k",
-                                        regex:
-                                          /^styles\.\d+\.crawlerInfo\.lastCrawled$/,
-                                      },
-                                    },
-                                    {
-                                      $regexMatch: {
-                                        input: "$$field.k",
-                                        regex:
-                                          /^styles\.\d+\.variants\.\d+\.stockUpdatedAt$/,
-                                      },
-                                    },
-                                  ],
                                 },
                               },
                             },
                           },
-                        },
-                        0,
-                      ],
+                          0,
+                        ],
+                      },
                     },
                   },
                 },
-              },
-              // Include other operations like inserts or deletes
-              { operationType: { $in: ["insert", "delete", "replace"] } },
-            ],
+                // Include other operations like inserts or deletes
+                { operationType: { $in: ["insert", "delete", "replace"] } },
+              ],
+            },
           },
-        },
-      ];
+        ];
 
-      // Rest of the function remains unchanged
-      const nowInSeconds = Math.floor(new Date().getTime() / 1000);
-      const changeStream = this.client
-        .db(this.options.mongo.db)
-        .collection(this.options.mongo.collection)
-        .watch(pipeline, {
-          startAtOperationTime: new Timestamp({
-            t: this.options.since || nowInSeconds,
-            i: 0,
-          }),
-          fullDocument: "updateLookup",
-        });
-      changeStream.on("change", (changeEvent) => {
-        const fullDoc = changeEvent.fullDocument;
+        const nowInSeconds = Math.floor(new Date().getTime() / 1000);
+        const changeStream = this.client
+          .db(this.options.mongo.db)
+          .collection(this.options.mongo.collection)
+          .watch(pipeline, {
+            startAtOperationTime: new Timestamp({
+              t: this.options.since || nowInSeconds,
+              i: 0,
+            }),
+            fullDocument: "updateLookup",
+          });
 
-        this.processor.processDoc(fullDoc, false, (err) => {
-          if (err) {
-            this.log(new Error("error processing change:", changeEvent));
-            this.log(err);
+        changeStream.on("change", (changeEvent) => {
+          const fullDoc = changeEvent.fullDocument;
+
+          this.processor.processDoc(fullDoc, false, (err) => {
+            if (err) {
+              this.log(new Error("error processing change:", changeEvent));
+              this.log(err);
+            }
+          });
+          if (changeEvent.wallTime) {
+            this.setLastOpTimestamp(new Date(changeEvent.wallTime).getTime());
           }
         });
-        if (changeEvent.wallTime) {
-          this.setLastOpTimestamp(new Date(changeEvent.wallTime).getTime());
-        }
-      });
 
-      // Handle errors
-      changeStream.on("error", (error) => {
-        this.log(error);
-      });
+        // Handle errors with reconnection
+        changeStream.on("error", (error) => {
+          this.log("error", "Change stream error:", error);
 
-      this.log("info", "Change stream started");
-    } catch (err) {
-      this.log("error", "Failed to start change stream:", err);
-    }
+          // Close current client
+          if (this.client) {
+            this.client.close().catch(() => {});
+            this.client = null;
+          }
+
+          // Retry after delay
+          setTimeout(() => {
+            this.log("info", "Attempting to reconnect change stream...");
+            startWatchStream();
+          }, 5000);
+        });
+
+        this.log("info", "Change stream started");
+        return changeStream;
+      } catch (err) {
+        this.log("error", "Failed to start change stream:", err);
+
+        // Retry after delay
+        setTimeout(() => {
+          this.log("info", "Retrying change stream connection...");
+          startWatchStream();
+        }, 10000);
+      }
+    };
+
+    return startWatchStream();
   }
 
   processEntireCollection() {
